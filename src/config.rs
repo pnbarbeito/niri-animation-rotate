@@ -120,7 +120,7 @@ fn load_config_file(path: &PathBuf) -> Result<KdlConfig> {
     let kdl: KdlConfig = knuffel::parse(path.to_str().unwrap_or("config"), &content)
         .context("Failed to parse config file (expected KDL)")?;
 
-    tracing::info!(config_path = %path.display(), "Loaded config file");
+    eprintln!("Loaded config file: {}", path.display());
     Ok(kdl)
 }
 
