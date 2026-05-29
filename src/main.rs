@@ -4,8 +4,9 @@ mod niri;
 
 use anyhow::Result;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
+use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{mpsc, Mutex};
 
 fn main() -> Result<()> {
@@ -43,10 +44,6 @@ fn main() -> Result<()> {
         }
     };
 
-    // Apply the initial animation
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(rotator.apply_current())?;
-
     tracing::info!(
         file_count = rotator.file_count(),
         "Animation rotator ready, starting event loop"
@@ -54,11 +51,37 @@ fn main() -> Result<()> {
 
     // Run the event loop
     let animator = Arc::new(Mutex::new(rotator));
-
+    let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(run_event_loop(config, animator))
 }
 
 async fn run_event_loop(
+    config: config::Config,
+    animator: Arc<Mutex<animation::AnimationRotator>>,
+) -> Result<()> {
+    match config.mode {
+        config::Mode::Auto => run_auto_event_loop(config, animator).await,
+        config::Mode::Manual => run_manual_event_loop(config, animator).await,
+    }
+}
+
+/// Rotate the animation and optionally reload Niri config.
+async fn rotate_and_reload(
+    animator: &Arc<Mutex<animation::AnimationRotator>>,
+    no_reload: bool,
+) {
+    let mut anim = animator.lock().await;
+    if let Err(e) = anim.rotate().await {
+        tracing::warn!(error = %e, "Failed to rotate animation");
+    } else if !no_reload {
+        if let Err(e) = niri::reload_niri().await {
+            tracing::warn!(error = %e, "Failed to reload Niri config");
+        }
+    }
+}
+
+/// Auto mode: listen to Niri compositor events and rotate automatically.
+async fn run_auto_event_loop(
     config: config::Config,
     animator: Arc<Mutex<animation::AnimationRotator>>,
 ) -> Result<()> {
@@ -70,13 +93,14 @@ async fn run_event_loop(
     tracing::info!(socket = %socket_path, "Connecting to Niri event stream");
 
     // Connect to Niri socket and subscribe to event stream
-    let stream = UnixStream::connect(&socket_path).await?;
-    let mut write_stream = UnixStream::connect(&socket_path).await?;
+    let mut stream = UnixStream::connect(&socket_path).await?;
 
-    // Subscribe to the event stream
-    write_stream.write_all(b"\"EventStream\"\n").await?;
-    // Drop the write end so Niri knows we're done writing
-    drop(write_stream);
+    // Subscribe to the event stream.
+    // Events arrive on the same connection where we send the command,
+    // so we use a single socket: write the command, then read events.
+    stream.write_all(b"\"EventStream\"\n").await?;
+    // Shut down the write half so Niri knows we're done sending commands.
+    stream.shutdown().await?;
 
     let reader = BufReader::new(stream);
     let mut lines = reader.lines();
@@ -93,12 +117,17 @@ async fn run_event_loop(
     // Main event loop with signal handling
     let mut initial_events_seen = 0;
     const EXPECTED_INITIAL_EVENTS: usize = 5;
+    let mut last_rotation: Option<Instant> = None;
 
     loop {
         tokio::select! {
             line = lines.next_line() => {
                 match line {
                     Ok(Some(line)) => {
+                        if config.log_socket {
+                            eprintln!("[socket] {}", line);
+                        }
+
                         let event_type = match extract_event_type(&line) {
                             Some(t) => t.to_string(),
                             None => {
@@ -122,13 +151,22 @@ async fn run_event_loop(
                             event_type.as_str(),
                             "WindowOpenedOrChanged" | "WindowClosed" | "WorkspaceActivated"
                         ) {
-                            tracing::debug!(event = %event_type, "Triggering animation rotation");
-                            let mut anim = animator.lock().await;
-                            if let Err(e) = anim.rotate().await {
-                                tracing::warn!(error = %e, "Failed to rotate animation");
-                            } else if let Err(e) = niri::reload_niri().await {
-                                tracing::warn!(error = %e, "Failed to reload Niri config");
+                            // Cooldown: skip if the last rotation was too recent
+                            if let Some(t) = last_rotation {
+                                let elapsed = t.elapsed().as_millis() as u64;
+                                if elapsed < config.cooldown_ms {
+                                    tracing::debug!(
+                                        elapsed_ms = elapsed,
+                                        cooldown_ms = config.cooldown_ms,
+                                        "Rotation skipped: cooldown active"
+                                    );
+                                    continue;
+                                }
                             }
+
+                            tracing::debug!(event = %event_type, "Triggering animation rotation");
+                            rotate_and_reload(&animator, config.no_reload).await;
+                            last_rotation = Some(Instant::now());
                         } else {
                             tracing::trace!(event = %event_type, "Event ignored");
                         }
@@ -154,6 +192,77 @@ async fn run_event_loop(
             }
         }
     }
+
+    Ok(())
+}
+
+/// Manual mode: listen on a control socket for "rotate" commands.
+async fn run_manual_event_loop(
+    config: config::Config,
+    animator: Arc<Mutex<animation::AnimationRotator>>,
+) -> Result<()> {
+    // Remove old socket file if it exists, then bind
+    let _ = tokio::fs::remove_file(&config.control_socket).await;
+    let listener = UnixListener::bind(&config.control_socket)?;
+
+    tracing::info!(
+        control_socket = %config.control_socket.display(),
+        "Manual mode: waiting for 'rotate' commands on control socket"
+    );
+
+    // Spawn filesystem watcher
+    let (watcher_tx, mut watcher_rx) = mpsc::unbounded_channel::<()>();
+    let watcher_config = config.clone();
+    tokio::spawn(async move {
+        run_watcher(watcher_config, watcher_tx).await;
+    });
+
+    let mut last_rotation: Option<Instant> = None;
+
+    loop {
+        tokio::select! {
+            result = listener.accept() => {
+                let (mut stream, _) = result?;
+                let mut buf = String::new();
+                let mut reader = BufReader::new(&mut stream);
+                reader.read_line(&mut buf).await?;
+
+                let command = buf.trim();
+                if command == "rotate" {
+                    // Cooldown: skip if the last rotation was too recent
+                    if let Some(t) = last_rotation {
+                        let elapsed = t.elapsed().as_millis() as u64;
+                        if elapsed < config.cooldown_ms {
+                            tracing::debug!(
+                                elapsed_ms = elapsed,
+                                cooldown_ms = config.cooldown_ms,
+                                "Rotation skipped: cooldown active"
+                            );
+                            continue;
+                        }
+                    }
+
+                    tracing::info!("Received 'rotate' command on control socket");
+                    rotate_and_reload(&animator, config.no_reload).await;
+                    last_rotation = Some(Instant::now());
+                } else {
+                    tracing::debug!(command = %command, "Unknown command on control socket");
+                }
+            }
+            Some(()) = watcher_rx.recv() => {
+                tracing::info!("Filesystem change detected, refreshing animation list");
+                let mut anim = animator.lock().await;
+                anim.refresh().await;
+            }
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("Received SIGINT, shutting down gracefully");
+                break;
+            }
+        }
+    }
+
+    // Clean up the socket file on shutdown
+    let _ = tokio::fs::remove_file(&config.control_socket).await;
 
     Ok(())
 }

@@ -2,11 +2,29 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use std::path::PathBuf;
 
+/// Operation mode for the animation rotator.
+#[derive(Debug, Clone, Copy, PartialEq, clap::ValueEnum)]
+pub enum Mode {
+    /// Listen to Niri compositor events and rotate automatically (default).
+    Auto,
+    /// Only rotate when a "rotate" command is received on the control socket.
+    Manual,
+}
+
 /// Configuration file parsed from KDL.
 ///
-/// Expected format (each line is a child node with a string argument):
-///   animation-dir "/home/user/.config/niri/niri-animation-rotate/animations"
-///   animation-target "/home/user/.config/niri/niri-animation-rotate/animation.kdl"
+/// All options available as CLI flags can also be set in the config file.
+/// Expected format (each line is a child node with an argument):
+///
+/// ```kdl
+/// animation-dir "/home/user/.../animations"
+/// animation-target "/home/user/.../animation.kdl"
+/// log-socket true
+/// no-reload true
+/// cooldown-ms 2000
+/// mode "manual"
+/// control-socket "/home/user/.../control.sock"
+/// ```
 #[derive(knuffel::Decode, Debug, Default, Clone)]
 struct KdlConfig {
     #[knuffel(child, unwrap(argument))]
@@ -14,6 +32,21 @@ struct KdlConfig {
 
     #[knuffel(child, unwrap(argument))]
     animation_target: Option<String>,
+
+    #[knuffel(child, unwrap(argument))]
+    log_socket: Option<bool>,
+
+    #[knuffel(child, unwrap(argument))]
+    no_reload: Option<bool>,
+
+    #[knuffel(child, unwrap(argument))]
+    cooldown_ms: Option<u64>,
+
+    #[knuffel(child, unwrap(argument))]
+    mode: Option<String>,
+
+    #[knuffel(child, unwrap(argument))]
+    control_socket: Option<String>,
 }
 
 /// niri-animation-rotate — Rotates Niri window animations on compositor events.
@@ -38,10 +71,18 @@ struct KdlConfig {
 pub struct Cli {
     /// Path to the configuration file.
     ///
-    /// KDL format with optional "animation-dir" and "animation-target" properties.
+    /// KDL format. All options available as CLI flags can also be set here.
     /// Example:
-    ///   animation-dir "/home/user/.config/niri/niri-animation-rotate/animations"
-    ///   animation-target "/home/user/.config/niri/niri-animation-rotate/animation.kdl"
+    ///
+    /// ```kdl
+    /// animation-dir "/home/user/.config/niri/niri-animation-rotate/animations"
+    /// animation-target "/home/user/.config/niri/niri-animation-rotate/animation.kdl"
+    /// log-socket true
+    /// no-reload true
+    /// cooldown-ms 2000
+    /// mode "manual"
+    /// control-socket "/home/user/.config/niri/niri-animation-rotate/control.sock"
+    /// ```
     ///
     /// [default: ~/.config/niri/niri-animation-rotate/config.kdl]
     #[arg(long)]
@@ -64,6 +105,40 @@ pub struct Cli {
     /// [default: ~/.config/niri/niri-animation-rotate/animation.kdl]
     #[arg(long)]
     pub animation_target: Option<PathBuf>,
+
+    /// Log all raw messages received from the Niri socket to stderr.
+    ///
+    /// Useful for debugging event reception issues.
+    #[arg(long)]
+    pub log_socket: bool,
+
+    /// Skip the `niri msg action reload` call after rotating.
+    ///
+    /// Use this if your shell/compositor setup handles config reload automatically
+    /// (e.g., NixOS nh, NixOS noctalia, or similar auto-reloading environments).
+    #[arg(long)]
+    pub no_reload: bool,
+
+    /// Minimum time in milliseconds to wait before allowing another rotation.
+    ///
+    /// Prevents animation swaps while a previous animation is still playing.
+    /// Set to 0 (default) for no cooldown.
+    #[arg(long)]
+    pub cooldown_ms: Option<u64>,
+
+    /// Operation mode: auto (listen to Niri events) or manual (control socket).
+    ///
+    /// In manual mode, the daemon listens on a Unix socket for "rotate" commands
+    /// instead of reacting to Niri compositor events. Use together with a Niri
+    /// keybind that sends "rotate" to the control socket.
+    #[arg(long, value_enum)]
+    pub mode: Option<Mode>,
+
+    /// Path to the control socket (used in manual mode).
+    ///
+    /// [default: ~/.config/niri/niri-animation-rotate/control.sock]
+    #[arg(long)]
+    pub control_socket: Option<PathBuf>,
 }
 
 /// Resolved application configuration after merging CLI args, config file, and defaults.
@@ -71,6 +146,11 @@ pub struct Cli {
 pub struct Config {
     pub animation_dir: PathBuf,
     pub animation_target: PathBuf,
+    pub log_socket: bool,
+    pub no_reload: bool,
+    pub cooldown_ms: u64,
+    pub mode: Mode,
+    pub control_socket: PathBuf,
 }
 
 impl Config {
@@ -98,9 +178,33 @@ impl Config {
             .or_else(|| kdl_config.animation_target.as_ref().map(PathBuf::from))
             .unwrap_or_else(default_animation_target);
 
+        let log_socket = cli.log_socket || kdl_config.log_socket.unwrap_or(false);
+
+        let no_reload = cli.no_reload || kdl_config.no_reload.unwrap_or(false);
+
+        let cooldown_ms = cli
+            .cooldown_ms
+            .or(kdl_config.cooldown_ms)
+            .unwrap_or(0);
+
+        let mode = cli
+            .mode
+            .or_else(|| parse_mode_from_kdl(kdl_config.mode.as_deref()))
+            .unwrap_or(Mode::Auto);
+
+        let control_socket = cli
+            .control_socket
+            .or_else(|| kdl_config.control_socket.as_ref().map(PathBuf::from))
+            .unwrap_or_else(default_control_socket);
+
         Ok(Config {
             animation_dir,
             animation_target,
+            log_socket,
+            no_reload,
+            cooldown_ms,
+            mode,
+            control_socket,
         })
     }
 }
@@ -148,6 +252,27 @@ fn default_animation_target() -> PathBuf {
         .join("animation.kdl")
 }
 
+fn default_control_socket() -> PathBuf {
+    dirs::config_dir()
+        .expect("Could not determine config directory")
+        .join("niri")
+        .join("niri-animation-rotate")
+        .join("control.sock")
+}
+
+/// Parse the mode string from a KDL config file into a `Mode` variant.
+/// Returns `None` if the value is invalid (a warning is logged).
+fn parse_mode_from_kdl(value: Option<&str>) -> Option<Mode> {
+    match value? {
+        "auto" | "Auto" => Some(Mode::Auto),
+        "manual" | "Manual" => Some(Mode::Manual),
+        s => {
+            tracing::warn!(mode = %s, "Invalid mode value in config file, using default");
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,7 +289,7 @@ mod tests {
         assert!(
             target
                 .to_string_lossy()
-                .contains("niri-animation-rotate/animations")
+                .contains("niri/niri-animation-rotate/animation")
         );
     }
 
