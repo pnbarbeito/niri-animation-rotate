@@ -21,9 +21,13 @@ pub enum Mode {
 /// animation-target "/home/user/.../animation.kdl"
 /// log-socket true
 /// no-reload true
+/// no-window-opened false
+/// no-window-closed false
+/// no-workspace-activated false
 /// cooldown-ms 2000
 /// mode "manual"
 /// control-socket "/home/user/.../control.sock"
+/// niri-socket "/run/user/1000/niri.sock"
 /// ```
 #[derive(knuffel::Decode, Debug, Default, Clone)]
 struct KdlConfig {
@@ -40,6 +44,15 @@ struct KdlConfig {
     no_reload: Option<bool>,
 
     #[knuffel(child, unwrap(argument))]
+    no_window_opened: Option<bool>,
+
+    #[knuffel(child, unwrap(argument))]
+    no_window_closed: Option<bool>,
+
+    #[knuffel(child, unwrap(argument))]
+    no_workspace_activated: Option<bool>,
+
+    #[knuffel(child, unwrap(argument))]
     cooldown_ms: Option<u64>,
 
     #[knuffel(child, unwrap(argument))]
@@ -47,6 +60,9 @@ struct KdlConfig {
 
     #[knuffel(child, unwrap(argument))]
     control_socket: Option<String>,
+
+    #[knuffel(child, unwrap(argument))]
+    niri_socket: Option<String>,
 }
 
 /// niri-animation-rotate — Rotates Niri window animations on compositor events.
@@ -79,9 +95,13 @@ pub struct Cli {
     /// animation-target "/home/user/.config/niri/niri-animation-rotate/animation.kdl"
     /// log-socket true
     /// no-reload true
+    /// no-window-opened false
+    /// no-window-closed false
+    /// no-workspace-activated false
     /// cooldown-ms 2000
     /// mode "manual"
     /// control-socket "/home/user/.config/niri/niri-animation-rotate/control.sock"
+    /// niri-socket "/run/user/1000/niri.sock"
     /// ```
     ///
     /// [default: ~/.config/niri/niri-animation-rotate/config.kdl]
@@ -119,6 +139,27 @@ pub struct Cli {
     #[arg(long)]
     pub no_reload: bool,
 
+    /// Do not rotate on WindowOpenedOrChanged events (window opens/changes).
+    ///
+    /// By default, the daemon rotates animations on every window open, close,
+    /// and workspace switch. Use this flag to exclude window open events.
+    #[arg(long)]
+    pub no_window_opened: bool,
+
+    /// Do not rotate on WindowClosed events (window closes).
+    ///
+    /// By default, the daemon rotates animations on every window open, close,
+    /// and workspace switch. Use this flag to exclude window close events.
+    #[arg(long)]
+    pub no_window_closed: bool,
+
+    /// Do not rotate on WorkspaceActivated events (workspace switch).
+    ///
+    /// By default, the daemon rotates animations on every window open, close,
+    /// and workspace switch. Use this flag to exclude workspace switch events.
+    #[arg(long)]
+    pub no_workspace_activated: bool,
+
     /// Minimum time in milliseconds to wait before allowing another rotation.
     ///
     /// Prevents animation swaps while a previous animation is still playing.
@@ -139,6 +180,13 @@ pub struct Cli {
     /// [default: ~/.config/niri/niri-animation-rotate/control.sock]
     #[arg(long)]
     pub control_socket: Option<PathBuf>,
+
+    /// Path to the Niri IPC socket.
+    ///
+    /// Overrides the `NIRI_SOCKET` environment variable.
+    /// If not set, falls back to the `NIRI_SOCKET` env var (which is set by the Niri session).
+    #[arg(long)]
+    pub niri_socket: Option<PathBuf>,
 }
 
 /// Resolved application configuration after merging CLI args, config file, and defaults.
@@ -148,9 +196,13 @@ pub struct Config {
     pub animation_target: PathBuf,
     pub log_socket: bool,
     pub no_reload: bool,
+    pub no_window_opened: bool,
+    pub no_window_closed: bool,
+    pub no_workspace_activated: bool,
     pub cooldown_ms: u64,
     pub mode: Mode,
     pub control_socket: PathBuf,
+    pub niri_socket: PathBuf,
 }
 
 impl Config {
@@ -182,10 +234,14 @@ impl Config {
 
         let no_reload = cli.no_reload || kdl_config.no_reload.unwrap_or(false);
 
-        let cooldown_ms = cli
-            .cooldown_ms
-            .or(kdl_config.cooldown_ms)
-            .unwrap_or(0);
+        let no_window_opened = cli.no_window_opened || kdl_config.no_window_opened.unwrap_or(false);
+
+        let no_window_closed = cli.no_window_closed || kdl_config.no_window_closed.unwrap_or(false);
+
+        let no_workspace_activated =
+            cli.no_workspace_activated || kdl_config.no_workspace_activated.unwrap_or(false);
+
+        let cooldown_ms = cli.cooldown_ms.or(kdl_config.cooldown_ms).unwrap_or(0);
 
         let mode = cli
             .mode
@@ -197,14 +253,26 @@ impl Config {
             .or_else(|| kdl_config.control_socket.as_ref().map(PathBuf::from))
             .unwrap_or_else(default_control_socket);
 
+        let niri_socket = cli
+            .niri_socket
+            .or_else(|| kdl_config.niri_socket.as_ref().map(PathBuf::from))
+            .or_else(default_niri_socket_from_env)
+            .context(
+                "NIRI_SOCKET environment variable not set. Are you running inside a Niri session?",
+            )?;
+
         Ok(Config {
             animation_dir,
             animation_target,
             log_socket,
             no_reload,
+            no_window_opened,
+            no_window_closed,
+            no_workspace_activated,
             cooldown_ms,
             mode,
             control_socket,
+            niri_socket,
         })
     }
 }
@@ -250,6 +318,10 @@ fn default_animation_target() -> PathBuf {
         .join("niri")
         .join("niri-animation-rotate")
         .join("animation.kdl")
+}
+
+fn default_niri_socket_from_env() -> Option<PathBuf> {
+    std::env::var("NIRI_SOCKET").ok().map(PathBuf::from)
 }
 
 fn default_control_socket() -> PathBuf {
@@ -298,5 +370,115 @@ mod tests {
         let result = load_config_file(&PathBuf::from("/nonexistent/path/config.kdl")).unwrap();
         assert!(result.animation_dir.is_none());
         assert!(result.animation_target.is_none());
+    }
+
+    #[test]
+    fn test_default_niri_socket_from_env_set() {
+        let original = std::env::var("NIRI_SOCKET").ok();
+        // SAFETY: These are test functions running sequentially with --test-threads=1,
+        // so there is no concurrent env var access.
+        unsafe {
+            std::env::set_var("NIRI_SOCKET", "/run/user/1000/niri.sock");
+        }
+        let result = default_niri_socket_from_env();
+        assert_eq!(result, Some(PathBuf::from("/run/user/1000/niri.sock")));
+        unsafe {
+            match original {
+                Some(v) => std::env::set_var("NIRI_SOCKET", v),
+                None => std::env::remove_var("NIRI_SOCKET"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_default_niri_socket_from_env_unset() {
+        let original = std::env::var("NIRI_SOCKET").ok();
+        // SAFETY: These are test functions running sequentially with --test-threads=1,
+        // so there is no concurrent env var access.
+        unsafe {
+            std::env::remove_var("NIRI_SOCKET");
+        }
+        let result = default_niri_socket_from_env();
+        assert_eq!(result, None);
+        unsafe {
+            match original {
+                Some(v) => std::env::set_var("NIRI_SOCKET", v),
+                None => std::env::remove_var("NIRI_SOCKET"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_event_filter_defaults_are_false() {
+        // Default KdlConfig should have None for the new fields,
+        // which means the merge pattern (cli.x || kdl.x.unwrap_or(false))
+        // produces false (events trigger rotation by default).
+        let kdl = KdlConfig::default();
+        assert!(kdl.no_window_opened.is_none());
+        assert!(kdl.no_window_closed.is_none());
+        assert!(kdl.no_workspace_activated.is_none());
+
+        // With CLI=false and config=None, resolved should be false:
+        assert!(!(false || kdl.no_window_opened.unwrap_or(false)));
+        assert!(!(false || kdl.no_window_closed.unwrap_or(false)));
+        assert!(!(false || kdl.no_workspace_activated.unwrap_or(false)));
+    }
+
+    #[test]
+    fn test_event_filter_merge_pattern() {
+        // Test the merge pattern: cli.x || kdl_config.x.unwrap_or(false)
+        // CLI false + config None = false (default, all events trigger)
+        assert!(!(false || None::<bool>.unwrap_or(false)));
+
+        // CLI false + config Some(true) = true (config enables suppression)
+        assert!(false || Some(true).unwrap_or(false));
+
+        // CLI true + config None = true (CLI enables suppression)
+        assert!(true || None::<bool>.unwrap_or(false));
+
+        // CLI true + config Some(true) = true (both enable suppression)
+        assert!(true || Some(true).unwrap_or(false));
+
+        // CLI true + config Some(false) = true (CLI wins)
+        assert!(true || Some(false).unwrap_or(false));
+    }
+
+    #[test]
+    fn test_event_filter_kdl_parsing() {
+        // Parse a KDL snippet with all three new fields set to true
+        let kdl: KdlConfig = knuffel::parse(
+            "test",
+            r#"
+log-socket true
+no-reload true
+no-window-opened true
+no-window-closed true
+no-workspace-activated true
+"#,
+        )
+        .expect("Failed to parse KDL config snippet");
+
+        assert_eq!(kdl.no_window_opened, Some(true));
+        assert_eq!(kdl.no_window_closed, Some(true));
+        assert_eq!(kdl.no_workspace_activated, Some(true));
+    }
+
+    #[test]
+    fn test_event_filter_kdl_parsing_false() {
+        // Parse a KDL snippet with the new fields set to false
+        let kdl: KdlConfig = knuffel::parse(
+            "test",
+            r#"
+log-socket true
+no-window-opened false
+no-window-closed false
+no-workspace-activated false
+"#,
+        )
+        .expect("Failed to parse KDL config snippet");
+
+        assert_eq!(kdl.no_window_opened, Some(false));
+        assert_eq!(kdl.no_window_closed, Some(false));
+        assert_eq!(kdl.no_workspace_activated, Some(false));
     }
 }

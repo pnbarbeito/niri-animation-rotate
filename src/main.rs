@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -66,10 +66,7 @@ async fn run_event_loop(
 }
 
 /// Rotate the animation and optionally reload Niri config.
-async fn rotate_and_reload(
-    animator: &Arc<Mutex<animation::AnimationRotator>>,
-    no_reload: bool,
-) {
+async fn rotate_and_reload(animator: &Arc<Mutex<animation::AnimationRotator>>, no_reload: bool) {
     let mut anim = animator.lock().await;
     if let Err(e) = anim.rotate().await {
         tracing::warn!(error = %e, "Failed to rotate animation");
@@ -85,15 +82,10 @@ async fn run_auto_event_loop(
     config: config::Config,
     animator: Arc<Mutex<animation::AnimationRotator>>,
 ) -> Result<()> {
-    // Check for Niri socket
-    let socket_path = std::env::var("NIRI_SOCKET").expect(
-        "NIRI_SOCKET environment variable not set. Are you running inside a Niri session?",
-    );
-
-    tracing::info!(socket = %socket_path, "Connecting to Niri event stream");
+    tracing::info!(socket = %config.niri_socket.display(), "Connecting to Niri event stream");
 
     // Connect to Niri socket and subscribe to event stream
-    let mut stream = UnixStream::connect(&socket_path).await?;
+    let mut stream = UnixStream::connect(&config.niri_socket).await?;
 
     // Subscribe to the event stream.
     // Events arrive on the same connection where we send the command,
@@ -147,10 +139,13 @@ async fn run_auto_event_loop(
                         }
 
                         // Check if this is a rotation-triggering event
-                        if matches!(
-                            event_type.as_str(),
-                            "WindowOpenedOrChanged" | "WindowClosed" | "WorkspaceActivated"
-                        ) {
+                        let should_rotate = match event_type.as_str() {
+                            "WindowOpenedOrChanged" => !config.no_window_opened,
+                            "WindowClosed" => !config.no_window_closed,
+                            "WorkspaceActivated" => !config.no_workspace_activated,
+                            _ => false,
+                        };
+                        if should_rotate {
                             // Cooldown: skip if the last rotation was too recent
                             if let Some(t) = last_rotation {
                                 let elapsed = t.elapsed().as_millis() as u64;

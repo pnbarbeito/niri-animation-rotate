@@ -20,10 +20,7 @@ impl AnimationRotator {
         let files = Self::scan_directory(&animation_dir)?;
 
         if files.is_empty() {
-            anyhow::bail!(
-                "No .kdl files found in {}",
-                animation_dir.display()
-            );
+            anyhow::bail!("No .kdl files found in {}", animation_dir.display());
         }
 
         let mut rotator = AnimationRotator {
@@ -165,10 +162,7 @@ impl AnimationRotator {
                     }
                 }
 
-                info!(
-                    count = rotator.files.len(),
-                    "Refreshed animation file list"
-                );
+                info!(count = rotator.files.len(), "Refreshed animation file list");
 
                 *self = rotator;
             }
@@ -238,8 +232,11 @@ mod tests {
 
     /// Create a unique temp directory for each test to avoid interference.
     fn setup_test_dir(test_name: &str) -> PathBuf {
-        let dir = std::env::temp_dir()
-            .join(format!("niri-animation-rotate-test-{}-{}", test_name, std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "niri-animation-rotate-test-{}-{}",
+            test_name,
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir

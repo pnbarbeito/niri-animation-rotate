@@ -7,6 +7,7 @@ Connects to the Niri compositor's IPC event stream and cycles through animation 
 ## Features
 
 - **Automatic mode** — rotates on `WindowOpenedOrChanged`, `WindowClosed`, and `WorkspaceActivated` events
+- **Configurable event filters** — exclude specific events (`--no-window-opened`, `--no-window-closed`, `--no-workspace-activated`)
 - **Manual mode** — rotate on demand via a Unix control socket and a Niri keybind
 - **Random shuffle** — animation order is shuffled on every startup
 - **Auto-refresh** — watches the animation directory for new, removed, or modified files in real time
@@ -35,11 +36,25 @@ cargo build --release
 
 The binary will be at `target/release/niri-animation-rotate`.
 
-### Cargo install
+### Copy to ~/.local/bin (recommended)
+
+Copy the binary to a directory in your `PATH` so you can run it from anywhere:
 
 ```bash
-cargo install --path .
+cp target/release/niri-animation-rotate ~/.local/bin/
 ```
+
+This is especially useful if you plan to run it as a systemd service (see below).
+
+### Via cargo (alternative)
+
+If you prefer, you can install it directly from the repository:
+
+```bash
+cargo install --git https://github.com/yourusername/niri-animation-rotate.git
+```
+
+The binary will be at `~/.cargo/bin/niri-animation-rotate`.
 
 ## Setup
 
@@ -105,15 +120,19 @@ niri-animation-rotate [OPTIONS]
 | `--animation-target <PATH>` | Output file that Niri reads via `include` | `~/.config/niri/niri-animation-rotate/animation.kdl` |
 | `--mode <MODE>` | Operation mode: `auto` (Niri events) or `manual` (control socket) | `auto` |
 | `--control-socket <PATH>` | Unix socket path for manual mode | `~/.config/niri/niri-animation-rotate/control.sock` |
+| `--niri-socket <PATH>` | Niri IPC socket path (overrides `$NIRI_SOCKET`) | `$NIRI_SOCKET` env var |
 | `--cooldown-ms <MS>` | Minimum ms between rotations (0 = no cooldown) | `0` |
 | `--no-reload` | Skip `niri msg action reload` after rotation | — |
+| `--no-window-opened` | Do not rotate on window open/change events | — |
+| `--no-window-closed` | Do not rotate on window close events | — |
+| `--no-workspace-activated` | Do not rotate on workspace switch events | — |
 | `--log-socket` | Print raw Niri IPC lines to stderr (debugging) | — |
 | `-h`, `--help` | Print help | — |
 | `-V`, `--version` | Print version | — |
 
 ### Environment
 
-- `NIRI_SOCKET` — must be set (automatically set by Niri in your session). Not needed in manual mode.
+- `NIRI_SOCKET` — Niri IPC socket path (automatically set by Niri in your session). Can be overridden with `--niri-socket` or the config file. Not needed in manual mode.
 - `RUST_LOG` — controls log verbosity (default: `info`)
 
 ### Modes
@@ -181,21 +200,26 @@ The config file (`~/.config/niri/niri-animation-rotate/config.kdl`) supports all
 ```kdl
 animation-dir "~/.config/niri/niri-animation-rotate/animations"
 animation-target "~/.config/niri/niri-animation-rotate/animation.kdl"
+niri-socket "/run/user/1000/niri.sock"
 log-socket true
 no-reload true
+no-window-opened false
+no-window-closed false
+no-workspace-activated false
 cooldown-ms 2000
 mode "manual"
 control-socket "~/.config/niri/niri-animation-rotate/control.sock"
 ```
 
-For boolean options (`log-socket`, `no-reload`), the config file can only enable them. To disable, omit the line or use the CLI flag.
+For boolean options (`log-socket`, `no-reload`, `no-window-opened`, `no-window-closed`, `no-workspace-activated`), the config file can only enable them. To disable, omit the line or use the CLI flag.
 
 ### Merge precedence
 
 | Setting type | CLI | Config file | Default |
-|---|---|---|---|
-| Paths (`animation-dir`, etc.) | `--path /x` wins | `path "/x"` | `~/.config/niri/...` |
-| Bools (`log-socket`, `no-reload`) | `--flag` wins (always enables) | `flag true` enables | `false` |
+|---|---|---|---|---|
+| Paths (`animation-dir`, `animation-target`, `control-socket`) | `--path /x` wins | `path "/x"` | `~/.config/niri/...` |
+| Niri socket (`--niri-socket`) | `--niri-socket /x` wins | `niri-socket "/x"` | `$NIRI_SOCKET` env var |
+| Bools (`log-socket`, `no-reload`, `no-window-opened`, `no-window-closed`, `no-workspace-activated`) | `--flag` wins (always enables) | `flag true` enables | `false` |
 | Values (`cooldown-ms`, `mode`) | `--value X` wins | `value X` applies | `0` / `auto` |
 
 ## How it works
@@ -225,7 +249,12 @@ RUST_LOG=trace niri-animation-rotate
 
 ## Running as a systemd service (optional)
 
-Create `~/.config/systemd/user/niri-animation-rotate.service`:
+Create `~/.config/systemd/user/niri-animation-rotate.service`.
+
+Adjust `ExecStart` to match where you placed the binary:
+- If you copied it to `~/.local/bin/` (recommended), use the path below
+- If you used `cargo install --git`, the binary is at `~/.cargo/bin/`
+- If you built from source without copying, point it to `target/release/niri-animation-rotate`
 
 ```ini
 [Unit]
@@ -234,7 +263,7 @@ After=niri-session.service
 
 [Service]
 Type=simple
-ExecStart=%h/.cargo/bin/niri-animation-rotate
+ExecStart=%h/.local/bin/niri-animation-rotate
 Restart=on-failure
 RestartSec=5
 
@@ -242,10 +271,10 @@ RestartSec=5
 WantedBy=default.target
 ```
 
-For manual mode, include the flags:
+For manual mode, add the `--mode manual` flag:
 
 ```
-ExecStart=%h/.cargo/bin/niri-animation-rotate --mode manual
+ExecStart=%h/.local/bin/niri-animation-rotate --mode manual
 ```
 
 Enable and start:
