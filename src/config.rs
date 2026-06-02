@@ -23,8 +23,8 @@ pub enum Mode {
 /// no-reload true
 /// no-window-opened false
 /// no-window-closed false
-/// no-workspace-activated false
 /// cooldown-ms 2000
+/// duration-fallback-ms 500
 /// mode "manual"
 /// control-socket "/home/user/.../control.sock"
 /// niri-socket "/run/user/1000/niri.sock"
@@ -50,10 +50,13 @@ struct KdlConfig {
     no_window_closed: Option<bool>,
 
     #[knuffel(child, unwrap(argument))]
-    no_workspace_activated: Option<bool>,
+    cooldown_ms: Option<u64>,
 
     #[knuffel(child, unwrap(argument))]
-    cooldown_ms: Option<u64>,
+    duration_fallback_ms: Option<u64>,
+
+    #[knuffel(child, unwrap(argument))]
+    random_order: Option<bool>,
 
     #[knuffel(child, unwrap(argument))]
     mode: Option<String>,
@@ -68,9 +71,9 @@ struct KdlConfig {
 /// niri-animation-rotate — Rotates Niri window animations on compositor events.
 ///
 /// Connects to the Niri compositor's IPC event stream and rotates between
-/// animation KDL files every time a window is opened/closed or a workspace
-/// is activated. Each animation file is randomly shuffled on startup so that
-/// the order of animations is different every session.
+/// animation KDL files every time a window is opened or closed. Each animation
+/// file is randomly shuffled on startup so that the order of animations is
+/// different every session.
 ///
 /// The program watches the animation directory for changes in real time,
 /// automatically picking up new, modified, or removed animation files.
@@ -97,8 +100,9 @@ pub struct Cli {
     /// no-reload true
     /// no-window-opened false
     /// no-window-closed false
-    /// no-workspace-activated false
     /// cooldown-ms 2000
+    /// duration-fallback-ms 500
+    /// random-order true
     /// mode "manual"
     /// control-socket "/home/user/.config/niri/niri-animation-rotate/control.sock"
     /// niri-socket "/run/user/1000/niri.sock"
@@ -141,37 +145,55 @@ pub struct Cli {
 
     /// Do not rotate on WindowOpenedOrChanged events (window opens/changes).
     ///
-    /// By default, the daemon rotates animations on every window open, close,
-    /// and workspace switch. Use this flag to exclude window open events.
+    /// By default, the daemon rotates animations on every window open and close.
+    /// Use this flag to exclude window open events.
     #[arg(long)]
     pub no_window_opened: bool,
 
     /// Do not rotate on WindowClosed events (window closes).
     ///
-    /// By default, the daemon rotates animations on every window open, close,
-    /// and workspace switch. Use this flag to exclude window close events.
+    /// By default, the daemon rotates animations on every window open and close.
+    /// Use this flag to exclude window close events.
     #[arg(long)]
     pub no_window_closed: bool,
 
-    /// Do not rotate on WorkspaceActivated events (workspace switch).
-    ///
-    /// By default, the daemon rotates animations on every window open, close,
-    /// and workspace switch. Use this flag to exclude workspace switch events.
-    #[arg(long)]
-    pub no_workspace_activated: bool,
-
     /// Minimum time in milliseconds to wait before allowing another rotation.
     ///
-    /// Prevents animation swaps while a previous animation is still playing.
-    /// Set to 0 (default) for no cooldown.
+    /// This is an extra buffer added on top of the parsed animation duration.
+    /// Set to 0 (default) for no extra cooldown.
     #[arg(long)]
     pub cooldown_ms: Option<u64>,
 
+    /// Fallback animation duration in milliseconds for files without `duration-ms`.
+    ///
+    /// When an animation KDL file has no `duration-ms` value, this fallback is
+    /// used instead. Also serves as the default when the file list is empty
+    /// (e.g., at startup before the watcher picks up files).
+    ///
+    /// [default: 500]
+    #[arg(long)]
+    pub duration_fallback_ms: Option<u64>,
+
+    /// Randomize the animation order on startup and directory refresh.
+    ///
+    /// When enabled, the list of animation files is shuffled so the rotation
+    /// order differs each session. When disabled (default), files rotate in
+    /// alphabetical order by filename.
+    ///
+    /// [default: false]
+    #[arg(long)]
+    pub random_order: bool,
+
     /// Operation mode: auto (listen to Niri events) or manual (control socket).
     ///
-    /// In manual mode, the daemon listens on a Unix socket for "rotate" commands
-    /// instead of reacting to Niri compositor events. Use together with a Niri
-    /// keybind that sends "rotate" to the control socket.
+    /// In both modes, the control socket accepts queries (`current`, `list`)
+    /// and mode-switch commands (`mode auto`, `mode manual`) at any time.
+    /// In manual mode, rotation commands are also available: `next`/`prev`
+    /// (rotate), `select <name>` (pick by name). Use together with Niri
+    /// keybinds that send commands via `nc -U`.
+    ///
+    /// The `rotate` command is kept as an alias for `next` for backward
+    /// compatibility.
     #[arg(long, value_enum)]
     pub mode: Option<Mode>,
 
@@ -198,8 +220,9 @@ pub struct Config {
     pub no_reload: bool,
     pub no_window_opened: bool,
     pub no_window_closed: bool,
-    pub no_workspace_activated: bool,
     pub cooldown_ms: u64,
+    pub duration_fallback_ms: u64,
+    pub random_order: bool,
     pub mode: Mode,
     pub control_socket: PathBuf,
     pub niri_socket: PathBuf,
@@ -238,10 +261,14 @@ impl Config {
 
         let no_window_closed = cli.no_window_closed || kdl_config.no_window_closed.unwrap_or(false);
 
-        let no_workspace_activated =
-            cli.no_workspace_activated || kdl_config.no_workspace_activated.unwrap_or(false);
-
         let cooldown_ms = cli.cooldown_ms.or(kdl_config.cooldown_ms).unwrap_or(0);
+
+        let duration_fallback_ms = cli
+            .duration_fallback_ms
+            .or(kdl_config.duration_fallback_ms)
+            .unwrap_or(500);
+
+        let random_order = cli.random_order || kdl_config.random_order.unwrap_or(false);
 
         let mode = cli
             .mode
@@ -268,8 +295,9 @@ impl Config {
             no_reload,
             no_window_opened,
             no_window_closed,
-            no_workspace_activated,
             cooldown_ms,
+            duration_fallback_ms,
+            random_order,
             mode,
             control_socket,
             niri_socket,
@@ -416,12 +444,10 @@ mod tests {
         let kdl = KdlConfig::default();
         assert!(kdl.no_window_opened.is_none());
         assert!(kdl.no_window_closed.is_none());
-        assert!(kdl.no_workspace_activated.is_none());
 
         // With CLI=false and config=None, resolved should be false:
         assert!(!(false || kdl.no_window_opened.unwrap_or(false)));
         assert!(!(false || kdl.no_window_closed.unwrap_or(false)));
-        assert!(!(false || kdl.no_workspace_activated.unwrap_or(false)));
     }
 
     #[test]
@@ -445,7 +471,7 @@ mod tests {
 
     #[test]
     fn test_event_filter_kdl_parsing() {
-        // Parse a KDL snippet with all three new fields set to true
+        // Parse a KDL snippet with the event filter fields set to true
         let kdl: KdlConfig = knuffel::parse(
             "test",
             r#"
@@ -453,32 +479,90 @@ log-socket true
 no-reload true
 no-window-opened true
 no-window-closed true
-no-workspace-activated true
 "#,
         )
         .expect("Failed to parse KDL config snippet");
 
         assert_eq!(kdl.no_window_opened, Some(true));
         assert_eq!(kdl.no_window_closed, Some(true));
-        assert_eq!(kdl.no_workspace_activated, Some(true));
     }
 
     #[test]
     fn test_event_filter_kdl_parsing_false() {
-        // Parse a KDL snippet with the new fields set to false
+        // Parse a KDL snippet with the event filter fields set to false
         let kdl: KdlConfig = knuffel::parse(
             "test",
             r#"
 log-socket true
 no-window-opened false
 no-window-closed false
-no-workspace-activated false
 "#,
         )
         .expect("Failed to parse KDL config snippet");
 
         assert_eq!(kdl.no_window_opened, Some(false));
         assert_eq!(kdl.no_window_closed, Some(false));
-        assert_eq!(kdl.no_workspace_activated, Some(false));
+    }
+
+    #[test]
+    fn test_duration_fallback_ms_defaults_to_500() {
+        // No CLI flag and no config → should be 500
+        assert_eq!(None::<u64>.or(None::<u64>).unwrap_or(500), 500);
+        // Config set to 300, no CLI → should be 300
+        assert_eq!(None::<u64>.or(Some(300u64)).unwrap_or(500), 300);
+        // CLI set to 800 → should be 800
+        assert_eq!(Some(800u64).or(None::<u64>).unwrap_or(500), 800);
+    }
+
+    #[test]
+    fn test_duration_fallback_ms_kdl_parsing() {
+        let kdl: KdlConfig = knuffel::parse(
+            "test",
+            r#"
+cooldown-ms 2000
+duration-fallback-ms 750
+"#,
+        )
+        .expect("Failed to parse KDL config snippet");
+
+        assert_eq!(kdl.duration_fallback_ms, Some(750));
+    }
+
+    #[test]
+    fn test_random_order_defaults_to_false() {
+        // CLI false + KDL None = false (default)
+        assert!(!(false || None::<bool>.unwrap_or(false)));
+        // CLI false + KDL true = true (KDL enables)
+        assert!(false || Some(true).unwrap_or(false));
+        // CLI true + KDL None = true (CLI enables)
+        assert!(true || None::<bool>.unwrap_or(false));
+    }
+
+    #[test]
+    fn test_random_order_kdl_parsing() {
+        let kdl: KdlConfig = knuffel::parse(
+            "test",
+            r#"
+random-order true
+duration-fallback-ms 300
+"#,
+        )
+        .expect("Failed to parse KDL config snippet");
+
+        assert_eq!(kdl.random_order, Some(true));
+        assert_eq!(kdl.duration_fallback_ms, Some(300));
+    }
+
+    #[test]
+    fn test_random_order_kdl_parsing_false() {
+        let kdl: KdlConfig = knuffel::parse(
+            "test",
+            r#"
+random-order false
+"#,
+        )
+        .expect("Failed to parse KDL config snippet");
+
+        assert_eq!(kdl.random_order, Some(false));
     }
 }

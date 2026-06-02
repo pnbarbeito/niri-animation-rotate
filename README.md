@@ -6,12 +6,13 @@ Connects to the Niri compositor's IPC event stream and cycles through animation 
 
 ## Features
 
-- **Automatic mode** — rotates on `WindowOpenedOrChanged`, `WindowClosed`, and `WorkspaceActivated` events
-- **Configurable event filters** — exclude specific events (`--no-window-opened`, `--no-window-closed`, `--no-workspace-activated`)
-- **Manual mode** — rotate on demand via a Unix control socket and a Niri keybind
-- **Random shuffle** — animation order is shuffled on every startup
+- **Automatic mode** — rotates on `WindowOpenedOrChanged` and `WindowClosed` events
+- **Configurable event filters** — exclude specific events (`--no-window-opened`, `--no-window-closed`)
+- **Duration-aware cooldown** — smart cooldown that parses each animation's actual duration to avoid mid-play swaps
+- **Manual mode** — rotate on demand via a Unix control socket with bidirectional responses
+- **Full command set** — `next`, `prev`, `current`, `list`, and `select <name>` for manual control
+- **Configurable shuffle** — randomly shuffle animation order on startup (`--random-order`, disabled by default)
 - **Auto-refresh** — watches the animation directory for new, removed, or modified files in real time
-- **Cooldown** — optional minimum time between rotations to prevent mid-play swaps
 - **No-reload mode** — skip `niri msg action reload` for environments that auto-reload on file change
 - **KDL config** — uses the same format as Niri for configuration
 - **CLI + config file** — flexible configuration with `--flags` or a persistent config file
@@ -118,14 +119,15 @@ niri-animation-rotate [OPTIONS]
 | `--config <PATH>` | Path to the configuration file (KDL format) | `~/.config/niri/niri-animation-rotate/config.kdl` |
 | `--animation-dir <DIR>` | Directory containing `.kdl` animation files | `~/.config/niri/niri-animation-rotate/animations` |
 | `--animation-target <PATH>` | Output file that Niri reads via `include` | `~/.config/niri/niri-animation-rotate/animation.kdl` |
-| `--mode <MODE>` | Operation mode: `auto` (Niri events) or `manual` (control socket) | `auto` |
+| `--mode <MODE>` | Operation mode: `auto` (Niri events) or `manual` (control socket with `next`/`prev`/`select`/`current`/`list`) | `auto` |
 | `--control-socket <PATH>` | Unix socket path for manual mode | `~/.config/niri/niri-animation-rotate/control.sock` |
+| `--random-order` | Randomly shuffle animation order on startup and directory refresh (disabled by default) | — |
 | `--niri-socket <PATH>` | Niri IPC socket path (overrides `$NIRI_SOCKET`) | `$NIRI_SOCKET` env var |
-| `--cooldown-ms <MS>` | Minimum ms between rotations (0 = no cooldown) | `0` |
+| `--cooldown-ms <MS>` | Extra buffer added on top of the parsed animation duration (ms) | `0` |
+| `--duration-fallback-ms <MS>` | Fallback duration for animation files without `duration-ms` | `500` |
 | `--no-reload` | Skip `niri msg action reload` after rotation | — |
 | `--no-window-opened` | Do not rotate on window open/change events | — |
 | `--no-window-closed` | Do not rotate on window close events | — |
-| `--no-workspace-activated` | Do not rotate on workspace switch events | — |
 | `--log-socket` | Print raw Niri IPC lines to stderr (debugging) | — |
 | `-h`, `--help` | Print help | — |
 | `-V`, `--version` | Print version | — |
@@ -139,7 +141,7 @@ niri-animation-rotate [OPTIONS]
 
 #### Auto mode (default)
 
-The daemon connects to the Niri IPC event stream and rotates animations automatically on `WindowOpenedOrChanged`, `WindowClosed`, and `WorkspaceActivated`. This is the default behavior.
+The daemon connects to the Niri IPC event stream and rotates animations automatically on `WindowOpenedOrChanged` and `WindowClosed` events. This is the default behavior.
 
 ```bash
 niri-animation-rotate
@@ -149,7 +151,7 @@ The first 5 events received are initial Niri state and are skipped.
 
 #### Manual mode
 
-Instead of listening to Niri events, the daemon listens on a Unix control socket for `rotate` commands. Use together with a Niri keybind.
+Instead of listening to Niri events, the daemon listens on a Unix control socket for rotation commands. Use together with Niri keybinds.
 
 First, start the daemon in manual mode:
 
@@ -157,33 +159,79 @@ First, start the daemon in manual mode:
 niri-animation-rotate --mode manual
 ```
 
-Then add a keybind to your Niri config (`~/.config/niri/config.kdl`):
+Then add keybinds to your Niri config (`~/.config/niri/config.kdl`):
 
 ```kdl
 binds {
-    Mod+Shift+A { spawn-sh "echo 'rotate' | nc -U $HOME/.config/niri/niri-animation-rotate/control.sock"; }
+    Mod+Shift+A { spawn-sh "echo 'next' | nc -U $HOME/.config/niri/niri-animation-rotate/control.sock"; }
+    Mod+Shift+D { spawn-sh "echo 'prev' | nc -U $HOME/.config/niri/niri-animation-rotate/control.sock"; }
 }
 ```
 
-Or with `socat`:
+**Available commands:**
 
-```kdl
-binds {
-    Mod+Shift+A { spawn-sh "echo 'rotate' | socat - UNIX-CONNECT:$HOME/.config/niri/niri-animation-rotate/control.sock"; }
-}
+| Command | Response | Description |
+|---------|----------|-------------|
+| `next` | _(none)_ | Advance to the next animation |
+| `prev` | _(none)_ | Go back to the previous animation |
+| `rotate` | _(none)_ | Alias for `next` (backward compatible) |
+| `current` | `prism_fold` | Return the filename (without `.kdl`) of the active animation |
+| `list` | `bloom`\n`prism_fold`\n`tv_crt`\n | Return all available animation filenames, one per line |
+| `select <name>` | `ok` or `error: not found` | Select a specific animation by name (without `.kdl`, case-insensitive) |
+| `mode auto` | `ok` | Hot-switch to auto mode (Niri events). Re-initializes debounce from current animation |
+| `mode manual` | `ok` | Hot-switch to manual mode (socket control). Manual cooldown starts fresh |
+
+All responses are plain text, one line each (multiple lines for `list`). Unknown commands return `error: unknown command: <cmd>`.
+
+> **Hot-switch:** You can switch modes at any time via the control socket. Start in auto mode, send `mode manual` to take manual control, and `mode auto` to resume automatic rotation. The control socket (`current`/`list` queries) works in both modes.
+
+**Examples using `nc` (netcat):**
+
+```bash
+# Get the current animation name
+echo "current" | nc -U ~/.config/niri/niri-animation-rotate/control.sock
+# → prism_fold
+
+# List all available animations
+echo "list" | nc -U ~/.config/niri/niri-animation-rotate/control.sock
+# → bloom
+# → prism_fold
+# → tv_crt
+
+# Select a specific animation
+echo "select tv_crt" | nc -U ~/.config/niri/niri-animation-rotate/control.sock
+# → ok
+
+echo "select nonexistent" | nc -U ~/.config/niri/niri-animation-rotate/control.sock
+# → error: not found
 ```
 
 The socket file is cleaned up automatically on shutdown.
 
 > **Note:** Niri's `spawn` does not use a shell and does not expand `~` or `$HOME`. Use `spawn-sh` (Niri ≥ 25.08) or pass the full absolute path with `spawn "sh" "-c" "..."`.
 
-#### Cooldown
+#### Cooldown (duration-aware)
 
-To prevent animation swaps mid-play, set a minimum time between rotations:
+The daemon reads each animation's `duration-ms` value from the KDL file and uses it to calculate when the animation will finish playing. Rotations are blocked while the current animation is still active.
 
 ```bash
-niri-animation-rotate --cooldown-ms 3000
+# No extra buffer — rotation only when the current animation finishes
+niri-animation-rotate --cooldown-ms 0
+
+# Add a 1000ms buffer after the animation finishes
+niri-animation-rotate --cooldown-ms 1000
 ```
+
+**How it works:**
+
+- On startup, the daemon parses the currently-active animation to determine how much longer it will play
+- Each incoming event resets the block timer using the current animation's duration — no rotation occurs until the timer expires
+- After a rotation, the block timer uses the **new** animation's parsed duration
+- If an animation file has no `duration-ms`, the `--duration-fallback-ms` value is used (default: 500ms)
+- If the animation file has a `slowdown <float>` multiplier (e.g., `slowdown 1.5`), it's automatically applied
+- In **manual mode**, the cooldown is fixed (duration parsing is not used)
+
+This eliminates mid-animation replacement and rapid-fire rotations by design.
 
 ## Configuration
 
@@ -205,13 +253,14 @@ log-socket true
 no-reload true
 no-window-opened false
 no-window-closed false
-no-workspace-activated false
 cooldown-ms 2000
+duration-fallback-ms 500
+random-order true
 mode "manual"
 control-socket "~/.config/niri/niri-animation-rotate/control.sock"
 ```
 
-For boolean options (`log-socket`, `no-reload`, `no-window-opened`, `no-window-closed`, `no-workspace-activated`), the config file can only enable them. To disable, omit the line or use the CLI flag.
+For boolean options (`log-socket`, `no-reload`, `no-window-opened`, `no-window-closed`), the config file can only enable them. To disable, omit the line or use the CLI flag.
 
 ### Merge precedence
 
@@ -219,18 +268,23 @@ For boolean options (`log-socket`, `no-reload`, `no-window-opened`, `no-window-c
 |---|---|---|---|---|
 | Paths (`animation-dir`, `animation-target`, `control-socket`) | `--path /x` wins | `path "/x"` | `~/.config/niri/...` |
 | Niri socket (`--niri-socket`) | `--niri-socket /x` wins | `niri-socket "/x"` | `$NIRI_SOCKET` env var |
-| Bools (`log-socket`, `no-reload`, `no-window-opened`, `no-window-closed`, `no-workspace-activated`) | `--flag` wins (always enables) | `flag true` enables | `false` |
-| Values (`cooldown-ms`, `mode`) | `--value X` wins | `value X` applies | `0` / `auto` |
+| Bools (`log-socket`, `no-reload`, `no-window-opened`, `no-window-closed`, `random-order`) | `--flag` wins (always enables) | `flag true` enables | `false` |
+| Values (`cooldown-ms`, `duration-fallback-ms`, `mode`) | `--value X` wins | `value X` applies | `0` / `500` / `auto` |
 
 ## How it works
 
 1. On startup, scans the animation directory for all `.kdl` files
-2. Shuffles the file list randomly (current selection is preserved across directory rescans)
-3. **Preserves the existing output file** — no overwrite on startup
-4. In auto mode: connects to Niri's event stream via Unix socket
-5. In manual mode: listens on a control socket for `rotate` commands
-6. On each rotation trigger, writes the next animation file atomically and reloads Niri's config
-7. Watches the animation directory for filesystem changes and refreshes the cache automatically
+2. Parses each file's animation duration from `duration-ms` values and `slowdown` multiplier
+3. Reads the current animation target to set the initial cooldown timer
+4. Optionally shuffles the file list (if `--random-order` is enabled); current selection preserved across rescans
+5. **Preserves the existing output file** — no overwrite on startup
+6. In auto mode: connects to Niri's event stream via Unix socket
+7. On each `WindowOpenedOrChanged` or `WindowClosed` event, checks the debounce timer:
+    - If the current animation has finished playing → rotates
+    - If the animation is still playing → extends the block timer (no rotation)
+8. In manual mode: listens on a control socket for `next`/`prev`/`select`/`current`/`list` commands (fixed cooldown)
+9. On each rotation trigger, writes the next animation file atomically and reloads Niri's config
+10. Watches the animation directory for filesystem changes and refreshes the cache automatically
 
 ## Logging
 
