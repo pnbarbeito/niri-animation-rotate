@@ -29,7 +29,7 @@ Connects to the Niri compositor's IPC event stream and cycles through animation 
 ### From source
 
 ```bash
-git clone https://github.com/yourusername/niri-animation-rotate.git
+git clone https://github.com/pnbarbeito/niri-animation-rotate.git
 cd niri-animation-rotate
 cargo build --release
 ```
@@ -51,7 +51,7 @@ This is especially useful if you plan to run it as a systemd service (see below)
 If you prefer, you can install it directly from the repository:
 
 ```bash
-cargo install --git https://github.com/yourusername/niri-animation-rotate.git
+cargo install --git https://github.com/pnbarbeito/niri-animation-rotate.git
 ```
 
 The binary will be at `~/.cargo/bin/niri-animation-rotate`.
