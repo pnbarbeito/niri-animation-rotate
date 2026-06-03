@@ -1,3 +1,8 @@
+/*
+Title: ribbons
+Authors: chaoscatsofficial@gmail.com
+Desc: imported from https://github.com/XansiVA/nirimation
+*/
 // This was a nightmare to make but here
 // original code from; https://github.com/XansiVA
 // Fixed: use raw strings (r"...") for GLSL shaders to match all other

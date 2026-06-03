@@ -4,6 +4,31 @@ A lightweight daemon that rotates Niri window animations on compositor events or
 
 Connects to the Niri compositor's IPC event stream and cycles through animation KDL files. Supports both automatic mode (event-driven) and manual mode (triggered via a keybind).
 
+## Quick Start
+
+Get from zero to animated in one minute:
+
+```bash
+# Option A — use the install script (recommended for new users)
+git clone https://github.com/pnbarbeito/niri-animation-rotate.git
+cd niri-animation-rotate
+./install.sh
+
+# Option B — manual installation
+# cargo build --release
+# cp target/release/niri-animation-rotate ~/.local/bin/
+# mkdir -p ~/.config/niri/niri-animation-rotate/animations
+# cp animations/*.kdl ~/.config/niri/niri-animation-rotate/animations/
+
+# 1. Add to ~/.config/niri/config.kdl:
+#    include "niri-animation-rotate/animation.kdl"
+
+# 2. Run the daemon (inside your Niri session):
+niri-animation-rotate
+```
+
+That's it! 27 bundled animations will cycle every time you open or close a window.
+
 ## Features
 
 - **Automatic mode** — rotates on `WindowOpenedOrChanged` and `WindowClosed` events
@@ -13,6 +38,7 @@ Connects to the Niri compositor's IPC event stream and cycles through animation 
 - **Full command set** — `next`, `prev`, `current`, `list`, and `select <name>` for manual control
 - **Configurable shuffle** — randomly shuffle animation order on startup (`--random-order`, disabled by default)
 - **Auto-refresh** — watches the animation directory for new, removed, or modified files in real time
+- **27 bundled animations** — ready-to-use presets included in the repository
 - **No-reload mode** — skip `niri msg action reload` for environments that auto-reload on file change
 - **KDL config** — uses the same format as Niri for configuration
 - **CLI + config file** — flexible configuration with `--flags` or a persistent config file
@@ -26,6 +52,33 @@ Connects to the Niri compositor's IPC event stream and cycles through animation 
 - Rust toolchain (for building from source)
 
 ## Installation
+
+### Automatic (install script)
+
+The easiest way to get started:
+
+```bash
+git clone https://github.com/pnbarbeito/niri-animation-rotate.git
+cd niri-animation-rotate
+./install.sh
+```
+
+This script will:
+
+1. Check for Rust/Cargo and Git
+2. Build the binary
+3. Copy it to `~/.local/bin/`
+4. Create the config directory structure
+5. Copy all 27 bundled animations to `~/.config/niri/niri-animation-rotate/animations/`
+6. Print the next steps for Niri configuration
+
+To also install a systemd user service, add `--systemd`:
+
+```bash
+./install.sh --systemd
+```
+
+For more details, see `./install.sh --help`.
 
 ### From source
 
@@ -59,13 +112,16 @@ The binary will be at `~/.cargo/bin/niri-animation-rotate`.
 
 ## Setup
 
-### 1. Create animation files
+### 1. Animation files
 
-Place your animation `.kdl` files in the animations directory:
+The repository comes with **27 ready-to-use animation presets** in the `animations/` folder. After building, copy them to the config directory:
 
 ```bash
 mkdir -p ~/.config/niri/niri-animation-rotate/animations
+cp animations/*.kdl ~/.config/niri/niri-animation-rotate/animations/
 ```
+
+You can also add your own `.kdl` files here — the daemon picks them up automatically in real time.
 
 Each `.kdl` file should contain a complete Niri `animations { ... }` block. For example:
 

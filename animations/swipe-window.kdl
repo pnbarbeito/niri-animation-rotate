@@ -1,4 +1,8 @@
-//Original code; https://github/XansiVA
+/*
+Title: swipe-window
+Authors: chaoscatsofficial@gmail.com
+Desc: imported from https://github.com/XansiVA/nirimation
+*/
 
 animations {
     workspace-switch {

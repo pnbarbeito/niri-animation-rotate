@@ -1,8 +1,7 @@
 /*
 Title: glide
 Authors: Justin Garza <JGarza9788@gmail.com>
-Desc: a softer Apple-like glide preset for niri.
-Demo: ./demos/glide.gif
+Desc: imported from https://github.com/jgarza9788/niri-animation-collection
 Notes:
 - Smooth, polished, low-bounce motion.
 - Open is slightly more luxurious than close.

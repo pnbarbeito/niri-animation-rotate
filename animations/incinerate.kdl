@@ -2,8 +2,7 @@
 Shader: incinerate
 Authors: Justin Garza <JGarza9788@gmail.com>
 Based on: incinerate by Simon Schneegans
-Desc: A Burn-My-Windows style fire burn effect adapted for niri custom shaders.
-Demo: ./demos/incinerate.gif
+Desc: imported from https://github.com/jgarza9788/niri-animation-collection
 */
 
 

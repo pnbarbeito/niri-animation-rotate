@@ -211,6 +211,19 @@ pub struct Cli {
     pub niri_socket: Option<PathBuf>,
 }
 
+/// Dynamic settings that can be changed at runtime via the control socket.
+///
+/// Values are initialized from `Config` (which merges KDL + CLI) and can be
+/// mutated while the daemon is running. When modified via `set`, the changes
+/// are persisted to the KDL config file for the next restart.
+#[derive(Debug, Clone)]
+pub struct RuntimeSettings {
+    pub cooldown_ms: u64,
+    pub no_window_opened: bool,
+    pub no_window_closed: bool,
+    pub random_order: bool,
+}
+
 /// Resolved application configuration after merging CLI args, config file, and defaults.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -226,6 +239,7 @@ pub struct Config {
     pub mode: Mode,
     pub control_socket: PathBuf,
     pub niri_socket: PathBuf,
+    pub config_path: PathBuf,
 }
 
 impl Config {
@@ -301,7 +315,18 @@ impl Config {
             mode,
             control_socket,
             niri_socket,
+            config_path,
         })
+    }
+
+    /// Create runtime settings initialized from the current config values.
+    pub fn to_runtime_settings(&self) -> RuntimeSettings {
+        RuntimeSettings {
+            cooldown_ms: self.cooldown_ms,
+            no_window_opened: self.no_window_opened,
+            no_window_closed: self.no_window_closed,
+            random_order: self.random_order,
+        }
     }
 }
 

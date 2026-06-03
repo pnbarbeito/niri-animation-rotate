@@ -404,6 +404,19 @@ impl AnimationRotator {
         self.current_index = 0;
     }
 
+    /// Change the random_order flag at runtime.
+    ///
+    /// If enabling (`true`) while previously disabled, shuffles the file list
+    /// immediately. If disabling (`false`), just updates the flag — the current
+    /// order is preserved until the next refresh.
+    pub fn set_random_order(&mut self, enabled: bool) {
+        let was_disabled = !self.random_order && enabled;
+        self.random_order = enabled;
+        if was_disabled {
+            self.shuffle();
+        }
+    }
+
     /// Try to resume from a previously-active animation by comparing
     /// the content of `animation_target` against all known files.
     ///
@@ -996,6 +1009,53 @@ mod tests {
         let rotator = AnimationRotator::new(dir.clone(), target, 500, false).unwrap();
         // No target to read → stays at index 0
         assert_eq!(rotator.current_index, 0);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_set_random_order_enables_and_shuffles() {
+        let dir = setup_test_dir("set-rand-enable");
+        create_test_file(&dir, "a.kdl", "content a");
+        create_test_file(&dir, "b.kdl", "content b");
+        create_test_file(&dir, "c.kdl", "content c");
+
+        let target = dir.join("animation.kdl");
+        let mut rotator = AnimationRotator::new(dir.clone(), target, 500, false).unwrap();
+
+        // Initially alphabetical: a, b, c
+        assert!(!rotator.random_order);
+        assert_eq!(rotator.file_stems(), vec!["a", "b", "c"]);
+
+        // Enable random order → should shuffle and reset index
+        rotator.set_random_order(true);
+        assert!(rotator.random_order);
+        assert_eq!(rotator.file_count(), 3);
+        // Index reset to 0 after shuffle
+        assert_eq!(rotator.current_index, 0);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_set_random_order_disables_preserves_order() {
+        let dir = setup_test_dir("set-rand-disable");
+        create_test_file(&dir, "a.kdl", "content a");
+        create_test_file(&dir, "b.kdl", "content b");
+
+        let target = dir.join("animation.kdl");
+        let mut rotator = AnimationRotator::new(dir.clone(), target, 500, true).unwrap();
+
+        // Capture state while random_order is true
+        let index_before = rotator.current_index;
+        let stems_before = rotator.file_stems();
+
+        // Disable random order → should NOT shuffle or change index
+        rotator.set_random_order(false);
+        assert!(!rotator.random_order);
+        assert_eq!(rotator.current_index, index_before);
+        // Order preserved (same stems, same order)
+        assert_eq!(rotator.file_stems(), stems_before);
 
         let _ = fs::remove_dir_all(&dir);
     }

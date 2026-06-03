@@ -1,8 +1,8 @@
 /*
 Title: pixel-sort
 Authors: Joe Hsu<jhsu.x1@gmail.com
-Desc: Reverse pixel-sort into the original window on open, then sort and fade on close.
-Demo: ./demos/pixel-sort.gif
+Desc: imported from https://github.com/jgarza9788/niri-animation-collection
+
 Notes:
 - Uses a realtime luminance-driven column remap to emulate pixel sorting.
 - Open starts in a heavily sorted state and resolves back to the original image.
