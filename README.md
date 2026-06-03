@@ -27,7 +27,7 @@ cd niri-animation-rotate
 niri-animation-rotate
 ```
 
-That's it! 27 bundled animations will cycle every time you open or close a window.
+That's it! 49 bundled animations will cycle every time you open or close a window.
 
 ## Features
 
@@ -38,7 +38,7 @@ That's it! 27 bundled animations will cycle every time you open or close a windo
 - **Full command set** — `next`, `prev`, `current`, `list`, and `select <name>` for manual control
 - **Configurable shuffle** — randomly shuffle animation order on startup (`--random-order`, disabled by default)
 - **Auto-refresh** — watches the animation directory for new, removed, or modified files in real time
-- **27 bundled animations** — ready-to-use presets included in the repository
+- **49 bundled animations** — ready-to-use presets included in the repository
 - **No-reload mode** — skip `niri msg action reload` for environments that auto-reload on file change
 - **KDL config** — uses the same format as Niri for configuration
 - **CLI + config file** — flexible configuration with `--flags` or a persistent config file
@@ -70,7 +70,7 @@ This script will:
 2. Build the binary
 3. Copy it to `~/.local/bin/`
 4. Create the config directory structure
-5. Copy all 27 bundled animations to `~/.config/niri/niri-animation-rotate/animations/`
+5. Copy all 49 bundled animations to `~/.config/niri/niri-animation-rotate/animations/`
 6. Install the `nrctl` control script to `~/.local/bin/`
 7. Print the next steps for Niri configuration
 
@@ -116,7 +116,7 @@ The binary will be at `~/.cargo/bin/niri-animation-rotate`.
 
 ### 1. Animation files
 
-The repository comes with **27 ready-to-use animation presets** in the `animations/` folder. After building, copy them to the config directory:
+The repository comes with **49 ready-to-use animation presets** in the `animations/` folder. After building, copy them to the config directory:
 
 ```bash
 mkdir -p ~/.config/niri/niri-animation-rotate/animations
@@ -447,6 +447,30 @@ systemctl --user daemon-reload
 systemctl --user enable niri-animation-rotate
 systemctl --user start niri-animation-rotate
 ```
+
+## Acknowledgments
+
+The 49 animation presets included in this repository are **not my own work**. They were created by talented authors and collected from the community. I'm deeply grateful for their excellent work and the quality of the animations they've created.
+
+### Authors and sources
+
+- **[chaoscatsofficial@gmail.com](mailto:chaoscatsofficial@gmail.com)** — 16 animations (bloom, burn-ashes, burn, burn-multicolor, explode, fold-window, glitch_00, glitch-cyberpunk, glitch, halftone, pixelate, pop-drop, ribbons, roll-drop, swipe-window, unravel)  
+  Source: [XansiVA/nirimation](https://github.com/XansiVA/nirimation)
+
+- **[Justin Garza](mailto:JGarza9788@gmail.com)** — 7 animations (blur, chromatic_edge, energize_b_niri, glide, incinerate, prism_fold, tv_crt)  
+  Source: [jgarza9788/niri-animation-collection](https://github.com/jgarza9788/niri-animation-collection)
+
+- **[Joe Hsu](mailto:jhsu.x1@gmail.com)** — 2 animations (dither-glitch, pixel-sort)  
+  Source: [jgarza9788/niri-animation-collection](https://github.com/jgarza9788/niri-animation-collection)
+
+- **liixini** ([github.com/liixini](https://github.com/liixini)) — 24 animations (circle, crosshatch, crosswarp, directiona-wipe, directional, disolve, fade, flyeye, glass-warp, glitch_01, heat-melt, ink-splash, inkwell-drop, morph, perlin, pixelfade-wave, plasma-flow, polar-function, polka-dots-curtain, randomsquares, smoke, snap, voronoi-shatter, wave-warp)  
+  Sources: [liixini/shaders](https://github.com/liixini/shaders) and [XansiVA/nirimation](https://github.com/XansiVA/nirimation)
+
+Thank you all for sharing your incredible work with the Niri community!
+
+## AI Assistance
+
+AI tools were used during the development of this project to assist with code generation, debugging, and documentation. However, the vast majority of the code and **all design decisions** are my own.
 
 ## License
 

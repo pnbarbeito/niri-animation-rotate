@@ -27,7 +27,7 @@ cd niri-animation-rotate
 niri-animation-rotate
 ```
 
-¡Listo! 27 animaciones incluidas rotarán cada vez que abras o cierres una ventana.
+¡Listo! 49 animaciones incluidas rotarán cada vez que abras o cierres una ventana.
 
 ## Características
 
@@ -38,7 +38,7 @@ niri-animation-rotate
 - **Comandos completos** — `next`, `prev`, `current`, `list` y `select <nombre>` para control manual
 - **Mezcla configurable** — mezcla aleatoriamente el orden al iniciar (`--random-order`, desactivada por defecto)
 - **Actualización automática** — vigila el directorio de animaciones en tiempo real para detectar archivos nuevos, eliminados o modificados
-- **27 animaciones incluidas** — presets listos para usar en el repositorio
+- **49 animaciones incluidas** — presets listos para usar en el repositorio
 - **Modo sin recarga** — omite `niri msg action reload` para entornos que recargan la configuración automáticamente al cambiar archivos
 - **Configuración KDL** — usa el mismo formato que Niri para la configuración
 - **CLI + archivo de configuración** — configuración flexible mediante `--flags` o un archivo persistente
@@ -70,7 +70,7 @@ Este script:
 2. Compila el binario
 3. Lo copia a `~/.local/bin/`
 4. Crea la estructura de directorios de configuración
-5. Copia las 27 animaciones incluidas a `~/.config/niri/niri-animation-rotate/animations/`
+5. Copia las 49 animaciones incluidas a `~/.config/niri/niri-animation-rotate/animations/`
 6. Instala el script de control `nrctl` en `~/.local/bin/`
 7. Muestra los siguientes pasos para configurar Niri
 
@@ -116,7 +116,7 @@ El binario estará en `~/.cargo/bin/niri-animation-rotate`.
 
 ### 1. Archivos de animación
 
-El repositorio incluye **27 presets de animación listos para usar** en la carpeta `animations/`. Después de compilar, cópialos al directorio de configuración:
+El repositorio incluye **49 presets de animación listos para usar** en la carpeta `animations/`. Después de compilar, cópialos al directorio de configuración:
 
 ```bash
 mkdir -p ~/.config/niri/niri-animation-rotate/animations
@@ -445,6 +445,30 @@ systemctl --user daemon-reload
 systemctl --user enable niri-animation-rotate
 systemctl --user start niri-animation-rotate
 ```
+
+## Agradecimientos
+
+Los 49 presets de animación incluidos en este repositorio **no son de mi autoría**. Fueron creados por talentosos autores y recopilados de la comunidad. Estoy profundamente agradecido por su excelente trabajo y la calidad de las animaciones que han creado.
+
+### Autores y fuentes
+
+- **[chaoscatsofficial@gmail.com](mailto:chaoscatsofficial@gmail.com)** — 16 animaciones (bloom, burn-ashes, burn, burn-multicolor, explode, fold-window, glitch_00, glitch-cyberpunk, glitch, halftone, pixelate, pop-drop, ribbons, roll-drop, swipe-window, unravel)  
+  Fuente: [XansiVA/nirimation](https://github.com/XansiVA/nirimation)
+
+- **[Justin Garza](mailto:JGarza9788@gmail.com)** — 7 animaciones (blur, chromatic_edge, energize_b_niri, glide, incinerate, prism_fold, tv_crt)  
+  Fuente: [jgarza9788/niri-animation-collection](https://github.com/jgarza9788/niri-animation-collection)
+
+- **[Joe Hsu](mailto:jhsu.x1@gmail.com)** — 2 animaciones (dither-glitch, pixel-sort)  
+  Fuente: [jgarza9788/niri-animation-collection](https://github.com/jgarza9788/niri-animation-collection)
+
+- **liixini** ([github.com/liixini](https://github.com/liixini)) — 24 animaciones (circle, crosshatch, crosswarp, directiona-wipe, directional, disolve, fade, flyeye, glass-warp, glitch_01, heat-melt, ink-splash, inkwell-drop, morph, perlin, pixelfade-wave, plasma-flow, polar-function, polka-dots-curtain, randomsquares, smoke, snap, voronoi-shatter, wave-warp)  
+  Fuentes: [liixini/shaders](https://github.com/liixini/shaders) y [XansiVA/nirimation](https://github.com/XansiVA/nirimation)
+
+¡Gracias a todos por compartir su increíble trabajo con la comunidad de Niri!
+
+## Asistencia de IA
+
+Se utilizaron herramientas de IA durante el desarrollo de este proyecto para asistir con generación de código, depuración y documentación. Sin embargo, la gran mayoría del código y **todas las decisiones de diseño** son mías.
 
 ## Licencia
 

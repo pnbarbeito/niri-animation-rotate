@@ -65,7 +65,7 @@ The installer will:
   2. Build niri-animation-rotate from source
   3. Copy the binary to ~/.local/bin/
   4. Create config directories under ~/.config/niri/niri-animation-rotate/
-  5. Copy bundled animations (27 presets) to the config directory
+   5. Copy bundled animations (49 presets) to the config directory
   6. Optionally set up a systemd user service (with --systemd)
   7. Print next steps for Niri configuration
 EOF
@@ -212,7 +212,8 @@ if [ -d "animations" ]; then
     info "Found $ANIM_COUNT bundled animation presets"
 
     # Copy animations, but don't overwrite existing ones
-    for anim in animations/*.kdl; do
+    for anim in animations/*.kdl animations/*.kld; do
+        [ -f "$anim" ] || continue
         filename=$(basename "$anim")
         target="$ANIMATIONS_DIR/$filename"
         if [ ! -f "$target" ]; then
@@ -329,6 +330,6 @@ echo -e "     ${YELLOW}nrctl status${NC}          # show daemon status"
 echo -e "     ${YELLOW}nrctl --help${NC}          # full command reference"
 echo ""
 echo -e "  ${CYAN}Tip:${NC} Use ${YELLOW}--random-order${NC} to shuffle animation order on startup."
-echo "       Use ${YELLOW}--cooldown-ms 1000${NC} to add a buffer between rotations."
+echo -e "       Use ${YELLOW}--cooldown-ms 1000${NC} to add a buffer between rotations."
 echo ""
 echo -e "${GREEN}Enjoy your animations! 🎬${NC}"
