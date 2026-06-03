@@ -464,7 +464,7 @@ The 49 animation presets included in this repository are **not my own work**. Th
   Source: [jgarza9788/niri-animation-collection](https://github.com/jgarza9788/niri-animation-collection)
 
 - **liixini** ([github.com/liixini](https://github.com/liixini)) — 24 animations (circle, crosshatch, crosswarp, directiona-wipe, directional, disolve, fade, flyeye, glass-warp, glitch_01, heat-melt, ink-splash, inkwell-drop, morph, perlin, pixelfade-wave, plasma-flow, polar-function, polka-dots-curtain, randomsquares, smoke, snap, voronoi-shatter, wave-warp)  
-  Sources: [liixini/shaders](https://github.com/liixini/shaders) and [XansiVA/nirimation](https://github.com/XansiVA/nirimation)
+  Sources: [liixini/shaders](https://github.com/liixini/shaders)
 
 Thank you all for sharing your incredible work with the Niri community!
 
