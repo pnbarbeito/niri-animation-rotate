@@ -171,9 +171,24 @@ fi
 # ──────────────────────────────────────────────
 header "4/6 — Installing binary"
 
+# Stop any running instance so the old binary can be safely replaced
+if $INSTALL_SYSTEMD; then
+    systemctl --user stop "$SERVICE_NAME" 2>/dev/null || true
+fi
+
 mkdir -p "$BIN_DIR"
+rm -f "$BIN_DIR/$BIN_NAME"     # allow overwriting even if daemon is running
 cp "target/release/$BIN_NAME" "$BIN_DIR/"
 info "Binary installed to $BIN_DIR/$BIN_NAME"
+
+# Install nrctl control script (optional, only if present in checkout)
+if [ -f "nrctl" ]; then
+    cp "nrctl" "$BIN_DIR/"
+    chmod +x "$BIN_DIR/nrctl"
+    info "Control script installed: $BIN_DIR/nrctl"
+else
+    warn "nrctl control script not found — skipping"
+fi
 
 # Check if BIN_DIR is in PATH
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
@@ -259,12 +274,12 @@ SERVICE
 
     info "Service file created: $SERVICE_DIR/$SERVICE_NAME"
 
-    # Reload and enable
+    # Reload, enable and start
     systemctl --user daemon-reload 2>/dev/null || warn "Could not reload systemd daemon"
     systemctl --user enable "$SERVICE_NAME" 2>/dev/null || warn "Could not enable service (not in a systemd user session?)"
+    systemctl --user start "$SERVICE_NAME" 2>/dev/null || warn "Could not start service"
 
-    info "Systemd service installed and enabled."
-    echo "  Start it with: systemctl --user start $SERVICE_NAME"
+    info "Systemd service installed, enabled and started."
 else
     header "6/6 — Skipped (use --systemd to install systemd service)"
 fi
@@ -287,10 +302,15 @@ echo ""
 echo "  2. Run the daemon:"
 echo ""
 echo -e "     ${YELLOW}$BIN_NAME${NC}"
-echo ""
-echo "     Or if you installed the systemd service:"
-echo ""
-echo -e "     ${YELLOW}systemctl --user start $SERVICE_NAME${NC}"
+if $INSTALL_SYSTEMD; then
+    echo ""
+    echo "     (The systemd service is already started and will auto-start on login.)"
+else
+    echo ""
+    echo "     Or if you installed the systemd service:"
+    echo ""
+    echo -e "     ${YELLOW}systemctl --user start $SERVICE_NAME${NC}"
+fi
 echo ""
 echo "  3. (Optional) To cycle animations manually via keybind, add to Niri config:"
 echo ""
@@ -298,6 +318,15 @@ echo '     binds {'
 echo "         Mod+Shift+A { spawn-sh \"echo 'next' | nc -U \$HOME/.config/niri/niri-animation-rotate/control.sock\"; }"
 echo "         Mod+Shift+D { spawn-sh \"echo 'prev' | nc -U \$HOME/.config/niri/niri-animation-rotate/control.sock\"; }"
 echo '     }'
+echo ""
+echo -e "  4. Control the daemon from the terminal with ${YELLOW}nrctl${NC}:"
+echo ""
+echo -e "     ${YELLOW}nrctl next${NC}            # rotate forward (shows result)"
+echo -e "     ${YELLOW}nrctl current${NC}         # show current animation"
+echo -e "     ${YELLOW}nrctl list${NC}            # list all animations"
+echo -e "     ${YELLOW}nrctl select <name>${NC}   # pick a specific animation"
+echo -e "     ${YELLOW}nrctl status${NC}          # show daemon status"
+echo -e "     ${YELLOW}nrctl --help${NC}          # full command reference"
 echo ""
 echo -e "  ${CYAN}Tip:${NC} Use ${YELLOW}--random-order${NC} to shuffle animation order on startup."
 echo "       Use ${YELLOW}--cooldown-ms 1000${NC} to add a buffer between rotations."

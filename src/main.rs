@@ -231,6 +231,9 @@ async fn run_unified_event_loop(
                 // Mode-switch commands (always available, in any mode)
                 if command == "mode auto" {
                     mode = config::Mode::Auto;
+                    if let Err(e) = update_kdl_value(&config.config_path, "mode", "\"auto\"") {
+                        tracing::warn!(error = %e, "Failed to persist mode to KDL");
+                    }
                     // Re-initialize auto-mode debounce from current target
                     if config.animation_target.exists()
                         && let Some(duracion) = duration::parse_animation_duration(&config.animation_target)
@@ -248,6 +251,9 @@ async fn run_unified_event_loop(
                 }
                 if command == "mode manual" {
                     mode = config::Mode::Manual;
+                    if let Err(e) = update_kdl_value(&config.config_path, "mode", "\"manual\"") {
+                        tracing::warn!(error = %e, "Failed to persist mode to KDL");
+                    }
                     last_rotation = None;
                     bloqueo_hasta = None;
                     tracing::info!("Switched to manual mode");

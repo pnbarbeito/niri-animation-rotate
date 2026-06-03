@@ -45,6 +45,7 @@ That's it! 27 bundled animations will cycle every time you open or close a windo
 - **Atomic writes** — writes animation files safely to avoid Niri reading partial content
 - **Graceful shutdown** — clean exit on SIGINT/SIGTERM
 - **Debug logging** — `--log-socket` to inspect raw Niri IPC messages
+- **nrctl CLI** — quick terminal control for manual mode (`nrctl next`, `nrctl select <name>`, etc.)
 
 ## Prerequisites
 
@@ -70,7 +71,8 @@ This script will:
 3. Copy it to `~/.local/bin/`
 4. Create the config directory structure
 5. Copy all 27 bundled animations to `~/.config/niri/niri-animation-rotate/animations/`
-6. Print the next steps for Niri configuration
+6. Install the `nrctl` control script to `~/.local/bin/`
+7. Print the next steps for Niri configuration
 
 To also install a systemd user service, add `--systemd`:
 
@@ -243,6 +245,8 @@ All responses are plain text, one line each (multiple lines for `list`). Unknown
 
 **Examples using `nc` (netcat):**
 
+> **Tip:** For day-to-day control, use `nrctl` instead of raw `nc` — it's simpler and shows the result after each rotation. See the [nrctl section](#nrctl--terminal-control-tool) below.
+
 ```bash
 # Get the current animation name
 echo "current" | nc -U ~/.config/niri/niri-animation-rotate/control.sock
@@ -288,6 +292,55 @@ niri-animation-rotate --cooldown-ms 1000
 - In **manual mode**, the cooldown is fixed (duration parsing is not used)
 
 This eliminates mid-animation replacement and rapid-fire rotations by design.
+
+### nrctl — terminal control tool
+
+`nrctl` is a convenience script installed alongside the daemon that lets you control it from the terminal without typing raw `nc -U` commands.
+
+If the daemon is running:
+
+```bash
+nrctl next                  # → rotate to next animation, prints result
+nrctl prev                  # ← go back to previous animation
+nrctl current               # show current animation name
+nrctl list                  # list all available animations
+nrctl list --json           # list as JSON array
+nrctl select <name>         # select a specific animation (case-insensitive)
+nrctl status                # show runtime status (mode, cooldown, etc.)
+nrctl status --json         # status as JSON
+nrctl mode auto             # switch to auto mode
+nrctl mode manual           # switch to manual mode
+
+nrctl --help                # full command reference
+```
+
+#### `nrctl set` — runtime settings
+
+All `set` changes persist to the config file (`~/.config/niri/niri-animation-rotate/config.kdl`).
+
+| Key | Values | Description |
+|-----|--------|-------------|
+| `cooldown-ms` | milliseconds (e.g. `500`, `2000`, `0`) | Minimum delay between rotations |
+| `random-order` | `true`, `false`, `1`, `0`, `yes`, `no` | Shuffle animation order on startup/refresh |
+| `no-window-opened` | `true`, `false`, `1`, `0`, `yes`, `no` | Ignore window open/change events (auto mode) |
+| `no-window-closed` | `true`, `false`, `1`, `0`, `yes`, `no` | Ignore window close events (auto mode) |
+
+Examples:
+
+```bash
+nrctl set cooldown-ms 2000       # 2-second cooldown
+nrctl set cooldown-ms 0          # disable cooldown
+nrctl set random-order true      # enable shuffle
+nrctl set random-order yes       # same as above (boolean aliases)
+nrctl set no-window-opened 1     # ignore window events
+nrctl set no-window-closed no    # re-enable close events
+```
+
+Set `NRCTL_SOCKET` to override the default control socket path:
+
+```bash
+NRCTL_SOCKET=/tmp/custom.sock nrctl current
+```
 
 ## Configuration
 
