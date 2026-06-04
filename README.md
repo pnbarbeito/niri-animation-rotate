@@ -1,3 +1,4 @@
+[![Release](https://github.com/pnbarbeito/niri-animation-rotate/actions/workflows/release.yml/badge.svg)](https://github.com/pnbarbeito/niri-animation-rotate/actions/workflows/release.yml)
 # niri-animation-rotate
 
 A lightweight daemon that rotates Niri window animations on compositor events or via manual keybinds.
