@@ -26,6 +26,8 @@ set -euo pipefail
 # ──────────────────────────────────────────────
 BIN_NAME="niri-animation-rotate"
 REPO_URL="https://github.com/pnbarbeito/niri-animation-rotate.git"
+GITHUB_API="https://api.github.com/repos/pnbarbeito/niri-animation-rotate/releases/latest"
+RELEASE_ARCHIVE="niri-animation-rotate-linux-x86_64.tar.gz"
 
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 CONFIG_DIR="$XDG_CONFIG_HOME/niri/niri-animation-rotate"
@@ -49,25 +51,65 @@ warn()  { echo -e "${YELLOW}⚠${NC} $1"; }
 error() { echo -e "${RED}✗${NC} $1"; }
 header(){ echo -e "\n${CYAN}━━━ $1 ━━━${NC}\n"; }
 
+download_release() {
+    header "$STEP/$TOTAL — Downloading precompiled binary"
+
+    local download_url
+    info "Fetching latest release info..."
+    download_url=$(curl -fsSL "$GITHUB_API" | grep "browser_download_url.*$RELEASE_ARCHIVE" | cut -d '"' -f 4 | head -1)
+
+    if [ -z "$download_url" ]; then
+        error "Could not find release download URL. Try --source to build from source instead."
+        exit 1
+    fi
+
+    info "Downloading: $download_url"
+    local tmp_archive="/tmp/$RELEASE_ARCHIVE"
+    curl -fsSL "$download_url" -o "$tmp_archive" || {
+        error "Download failed."
+        exit 1
+    }
+
+    info "Extracting..."
+    TMP_DIR=$(mktemp -d)
+    trap 'rm -rf "$TMP_DIR" "$tmp_archive"' EXIT
+    tar xzf "$tmp_archive" -C "$TMP_DIR" || {
+        error "Extraction failed."
+        exit 1
+    }
+    REPO_DIR="$TMP_DIR/niri-animation-rotate"
+
+    if [ ! -f "$REPO_DIR/niri-animation-rotate" ]; then
+        error "Precompiled binary not found in release archive."
+        exit 1
+    fi
+
+    info "Precompiled binary downloaded and verified."
+    cd "$REPO_DIR"
+}
+
 usage() {
     cat <<EOF
 Usage: $0 [OPTIONS]
 
 Options:
+  --release    Download precompiled binary from GitHub Releases (fast, no Rust needed)
+  --source     Build from source code (requires Rust/Cargo)
   --systemd    Install and enable a systemd user service
   --help       Show this help message and exit
+
+If neither --release nor --source is given, you will be prompted to choose.
 
 Environment:
   CARGO_HOME  Path to Cargo installation (default: ~/.cargo)
 
 The installer will:
-  1. Check for required tools (Rust/Cargo, Git)
-  2. Build niri-animation-rotate from source
-  3. Copy the binary to ~/.local/bin/
-  4. Create config directories under ~/.config/niri/niri-animation-rotate/
-   5. Copy bundled animations (49 presets) to the config directory
-  6. Optionally set up a systemd user service (with --systemd)
-  7. Print next steps for Niri configuration
+  1. Download or build niri-animation-rotate
+  2. Install the binary and nrctl to ~/.local/bin/
+  3. Create config directories under ~/.config/niri/niri-animation-rotate/
+  4. Copy bundled animations (49 presets) to the config directory
+  5. Optionally set up a systemd user service (with --systemd)
+  6. Print next steps for Niri configuration
 EOF
     exit 0
 }
@@ -76,9 +118,12 @@ EOF
 # Parse arguments
 # ──────────────────────────────────────────────
 INSTALL_SYSTEMD=false
+MODE=""  # release or source
 for arg in "$@"; do
     case "$arg" in
         --help) usage ;;
+        --release) MODE="release" ;;
+        --source)  MODE="source" ;;
         --systemd) INSTALL_SYSTEMD=true ;;
         *)
             error "Unknown option: $arg"
@@ -98,78 +143,95 @@ echo "╚═══════════════════════�
 echo -e "${NC}"
 
 # ──────────────────────────────────────────────
-# Step 1: Check prerequisites
+# Prompt for install method if not specified
 # ──────────────────────────────────────────────
-header "1/6 — Checking prerequisites"
-
-# Check if we're in the repo directory
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-IN_REPO=false
-if [ -f "$SCRIPT_DIR/Cargo.toml" ] && grep -q 'name = "niri-animation-rotate"' "$SCRIPT_DIR/Cargo.toml" 2>/dev/null; then
-    IN_REPO=true
-    REPO_DIR="$SCRIPT_DIR"
-    info "Found local repo at $REPO_DIR"
+if [ -z "$MODE" ]; then
+    echo ""
+    echo "How would you like to install niri-animation-rotate?"
+    echo ""
+    echo "  [1] Download precompiled binary (fast, no dependencies)"
+    echo "  [2] Build from source (requires Rust/Cargo)"
+    echo ""
+    read -r -p "Choice [1/2]: " choice
+    case "$choice" in
+        1) MODE="release" ;;
+        2) MODE="source" ;;
+        *) error "Invalid choice. Please run again and select 1 or 2."; exit 1 ;;
+    esac
 fi
 
-# Check for Rust/Cargo
-if command -v cargo &>/dev/null; then
-    info "Rust/Cargo found: $(cargo --version | head -1)"
+# ──────────────────────────────────────────────
+# Step 1: Get the binary (download or build)
+# ──────────────────────────────────────────────
+STEP=1
+TOTAL=5  # will adjust for source builds
+
+if [ "$MODE" = "release" ]; then
+    download_release
 else
-    warn "Rust/Cargo not found."
-    echo ""
-    echo "  Install the Rust toolchain with:"
-    echo ""
-    echo "      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
-    echo ""
-    echo "  Then restart your shell and run this installer again."
-    echo ""
-    exit 1
-fi
+    TOTAL=6
+    # ── Source build path ─────────────────────
+    header "$STEP/$TOTAL — Checking prerequisites"
 
-# Check for Git (only needed if not in repo)
-if ! $IN_REPO && ! command -v git &>/dev/null; then
-    error "Git is required to clone the repository. Install git and try again."
-    exit 1
-fi
-
-# ──────────────────────────────────────────────
-# Step 2: Get the source code
-# ──────────────────────────────────────────────
-header "2/6 — Getting source code"
-
-if $IN_REPO; then
-    info "Using local repository"
-    cd "$REPO_DIR"
-else
-    TMP_DIR=$(mktemp -d)
-    trap 'rm -rf "$TMP_DIR"' EXIT
-    info "Cloning repository from $REPO_URL"
-    git clone --depth=1 "$REPO_URL" "$TMP_DIR" || {
-        error "Failed to clone repository."
+    # Check for Rust/Cargo
+    if command -v cargo &>/dev/null; then
+        info "Rust/Cargo found: $(cargo --version | head -1)"
+    else
+        warn "Rust/Cargo not found."
+        echo ""
+        echo "  Install the Rust toolchain with:"
+        echo "      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+        echo ""
+        echo "  Then restart your shell and run this installer again."
+        echo ""
         exit 1
-    }
-    cd "$TMP_DIR"
-    REPO_DIR="$TMP_DIR"
-    info "Repository cloned"
+    fi
+
+    # Get source
+    STEP=2
+    header "$STEP/$TOTAL — Getting source code"
+
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+    IN_REPO=false
+    if [ -f "$SCRIPT_DIR/Cargo.toml" ] && grep -q 'name = "niri-animation-rotate"' "$SCRIPT_DIR/Cargo.toml" 2>/dev/null; then
+        IN_REPO=true
+        REPO_DIR="$SCRIPT_DIR"
+        info "Found local repo at $REPO_DIR"
+        cd "$REPO_DIR"
+    else
+        if ! command -v git &>/dev/null; then
+            error "Git is required to clone the repository. Install git and try again."
+            exit 1
+        fi
+        TMP_DIR=$(mktemp -d)
+        trap 'rm -rf "$TMP_DIR"' EXIT
+        info "Cloning repository from $REPO_URL"
+        git clone --depth=1 "$REPO_URL" "$TMP_DIR" || {
+            error "Failed to clone repository."
+            exit 1
+        }
+        cd "$TMP_DIR"
+        REPO_DIR="$TMP_DIR"
+        info "Repository cloned"
+    fi
+
+    # Build
+    STEP=3
+    header "$STEP/$TOTAL — Building binary"
+    info "Running cargo build --release (this may take a few minutes)..."
+    if cargo build --release; then
+        info "Build successful!"
+    else
+        error "Build failed. Please check the output above for errors."
+        exit 1
+    fi
 fi
 
 # ──────────────────────────────────────────────
-# Step 3: Build
+# Step N: Install binary (for both modes)
 # ──────────────────────────────────────────────
-header "3/6 — Building binary"
-
-info "Running cargo build --release (this may take a few minutes)..."
-if cargo build --release; then
-    info "Build successful!"
-else
-    error "Build failed. Please check the output above for errors."
-    exit 1
-fi
-
-# ──────────────────────────────────────────────
-# Step 4: Install binary
-# ──────────────────────────────────────────────
-header "4/6 — Installing binary"
+STEP=$((STEP + 1))
+header "$STEP/$TOTAL — Installing binary"
 
 # Stop any running instance so the old binary can be safely replaced
 if $INSTALL_SYSTEMD; then
@@ -178,7 +240,12 @@ fi
 
 mkdir -p "$BIN_DIR"
 rm -f "$BIN_DIR/$BIN_NAME"     # allow overwriting even if daemon is running
-cp "target/release/$BIN_NAME" "$BIN_DIR/"
+
+if [ "$MODE" = "release" ]; then
+    cp "$REPO_DIR/niri-animation-rotate" "$BIN_DIR/$BIN_NAME"
+else
+    cp "target/release/$BIN_NAME" "$BIN_DIR/"
+fi
 info "Binary installed to $BIN_DIR/$BIN_NAME"
 
 # Install nrctl control script (optional, only if present in checkout)
@@ -202,7 +269,8 @@ fi
 # ──────────────────────────────────────────────
 # Step 5: Setup config directories and animations
 # ──────────────────────────────────────────────
-header "5/6 — Setting up animations"
+STEP=$((STEP + 1))
+header "$STEP/$TOTAL — Setting up animations"
 
 mkdir -p "$ANIMATIONS_DIR"
 
@@ -255,7 +323,8 @@ info "Animations installed: $(find "$ANIMATIONS_DIR" -maxdepth 1 -name '*.kdl' |
 # Step 6: Optional systemd service
 # ──────────────────────────────────────────────
 if $INSTALL_SYSTEMD; then
-    header "6/6 — Installing systemd user service"
+    STEP=$((STEP + 1))
+    header "$STEP/$TOTAL — Installing systemd user service"
     mkdir -p "$SERVICE_DIR"
 
     cat > "$SERVICE_DIR/$SERVICE_NAME" <<SERVICE
@@ -282,7 +351,7 @@ SERVICE
 
     info "Systemd service installed, enabled and started."
 else
-    header "6/6 — Skipped (use --systemd to install systemd service)"
+    header "$TOTAL/$TOTAL — Skipped (use --systemd to install systemd service)"
 fi
 
 # ──────────────────────────────────────────────

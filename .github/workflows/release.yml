@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Build
+        run: cargo build --release --target x86_64-unknown-linux-musl
+
+      - name: Strip binary
+        run: strip target/x86_64-unknown-linux-musl/release/niri-animation-rotate
+
+      - name: Verify static linking
+        run: |
+          ldd target/x86_64-unknown-linux-musl/release/niri-animation-rotate 2>&1 | grep -q "not a dynamic executable" || (echo "Binary is not statically linked!" && exit 1)
+
+      - name: Create release bundle
+        run: |
+          mkdir -p release/niri-animation-rotate/animations
+          cp target/x86_64-unknown-linux-musl/release/niri-animation-rotate release/niri-animation-rotate/
+          cp nrctl release/niri-animation-rotate/
+          cp install.sh release/niri-animation-rotate/
+          cp animations/*.kdl release/niri-animation-rotate/animations/
+          cp README.md release/niri-animation-rotate/
+          cd release
+          tar czf ../niri-animation-rotate-linux-x86_64.tar.gz niri-animation-rotate/
+
+      - name: Generate checksums
+        run: |
+          sha256sum niri-animation-rotate-linux-x86_64.tar.gz > niri-animation-rotate-linux-x86_64.tar.gz.sha256
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            niri-animation-rotate-linux-x86_64.tar.gz
+            niri-animation-rotate-linux-x86_64.tar.gz.sha256
+          generate_release_notes: true
