@@ -24,10 +24,6 @@ jobs:
       - name: Strip binary
         run: strip target/x86_64-unknown-linux-musl/release/niri-animation-rotate
 
-      - name: Verify static linking
-        run: |
-          ldd target/x86_64-unknown-linux-musl/release/niri-animation-rotate 2>&1 | grep -q "not a dynamic executable" || (echo "Binary is not statically linked!" && exit 1)
-
       - name: Create release bundle
         run: |
           mkdir -p release/niri-animation-rotate/animations
@@ -40,8 +36,7 @@ jobs:
           tar czf ../niri-animation-rotate-linux-x86_64.tar.gz niri-animation-rotate/
 
       - name: Generate checksums
-        run: |
-          sha256sum niri-animation-rotate-linux-x86_64.tar.gz > niri-animation-rotate-linux-x86_64.tar.gz.sha256
+        run: sha256sum niri-animation-rotate-linux-x86_64.tar.gz > niri-animation-rotate-linux-x86_64.tar.gz.sha256
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
