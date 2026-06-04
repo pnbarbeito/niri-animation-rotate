@@ -29,6 +29,8 @@ niri-animation-rotate
 
 ¡Listo! 49 animaciones incluidas rotarán cada vez que abras o cierres una ventana.
 
+> **💡 Plugin para DMS** — ¿Prefieres una interfaz gráfica? El [plugin para Dank Material Shell](https://github.com/pnbarbeito/dms-niri-animation-rotate) incluye el daemon y ofrece un widget para el Centro de Control, pastilla en la barra y panel flotante. Instalación en 1 clic desde el marketplace de DMS — sin terminal.
+
 ## Características
 
 - **Modo automático** — rota al recibir eventos `WindowOpenedOrChanged` y `WindowClosed`

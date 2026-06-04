@@ -29,6 +29,8 @@ niri-animation-rotate
 
 That's it! 49 bundled animations will cycle every time you open or close a window.
 
+> **💡 DMS Plugin** — Prefer a graphical interface? The [Dank Material Shell plugin](https://github.com/pnbarbeito/dms-niri-animation-rotate) bundles the daemon and provides a Control Center widget, bar pill, and popout panel. 1-click install from the DMS marketplace — no terminal needed.
+
 ## Features
 
 - **Automatic mode** — rotates on `WindowOpenedOrChanged` and `WindowClosed` events
